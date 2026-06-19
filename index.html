@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WC 2026 — Match Predictor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* ── Base ─────────────────────────────────────────────────────────── */
+    body { background: #060b17; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
+
+    /* ── Custom scrollbar ─────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #0d1526; }
+    ::-webkit-scrollbar-thumb { background: #2a3f66; border-radius: 4px; }
+
+    /* ── Card ─────────────────────────────────────────────────────────── */
+    .card {
+      background: #0d1526;
+      border: 1px solid #1e2d4a;
+      border-radius: 12px;
+    }
+
+    /* ── Searchable dropdown ──────────────────────────────────────────── */
+    .sd-wrapper { position: relative; }
+    .sd-trigger {
+      display: flex; align-items: center; justify-content: space-between;
+      width: 100%; padding: 10px 14px;
+      background: #0a1020; border: 1px solid #1e2d4a; border-radius: 8px;
+      cursor: pointer; transition: border-color .15s;
+      font-size: 14px;
+    }
+    .sd-trigger:hover, .sd-trigger.open { border-color: #3b82f6; }
+    .sd-panel {
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50;
+      background: #0d1526; border: 1px solid #1e2d4a; border-radius: 8px;
+      box-shadow: 0 16px 32px rgba(0,0,0,.5);
+      display: none; overflow: hidden;
+    }
+    .sd-panel.open { display: block; }
+    .sd-search {
+      width: 100%; padding: 8px 12px;
+      background: #0a1020; border: none; border-bottom: 1px solid #1e2d4a;
+      color: #e2e8f0; font-size: 13px; outline: none;
+    }
+    .sd-list { max-height: 220px; overflow-y: auto; }
+    .sd-option {
+      padding: 8px 14px; cursor: pointer; font-size: 13px;
+      transition: background .1s;
+    }
+    .sd-option:hover { background: #162035; }
+    .sd-option.selected { background: #162035; color: #3b82f6; }
+
+    /* ── Range sliders ────────────────────────────────────────────────── */
+    input[type="range"] {
+      -webkit-appearance: none; width: 100%; height: 5px;
+      border-radius: 3px; background: #1e2d4a; outline: none; cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 16px; height: 16px;
+      border-radius: 50%; background: #3b82f6; cursor: pointer;
+      box-shadow: 0 0 6px rgba(59,130,246,.6);
+    }
+    input[type="range"].green::-webkit-slider-thumb { background: #10b981; box-shadow: 0 0 6px rgba(16,185,129,.6); }
+    input[type="range"].red::-webkit-slider-thumb   { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,.6); }
+
+    /* ── Probability bar ──────────────────────────────────────────────── */
+    .prob-bar { height: 14px; border-radius: 7px; overflow: hidden; display: flex; }
+    .prob-t1  { background: linear-gradient(90deg, #2563eb, #3b82f6); transition: width .6s ease; }
+    .prob-draw{ background: #334155; transition: width .6s ease; }
+    .prob-t2  { background: linear-gradient(90deg, #ef4444, #dc2626); transition: width .6s ease; }
+
+    /* ── Stat bar ─────────────────────────────────────────────────────── */
+    .stat-fill { height: 6px; border-radius: 3px; transition: width .5s ease; }
+
+    /* ── Animations ───────────────────────────────────────────────────── */
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-up { animation: fadeUp .4s ease both; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { animation: spin 1s linear infinite; }
+
+    /* ── Gradient heading ─────────────────────────────────────────────── */
+    .gradient-text {
+      background: linear-gradient(135deg, #60a5fa 0%, #34d399 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+
+    /* ── Timeline ─────────────────────────────────────────────────────── */
+    .tl-bar {
+      height: 4px; background: #1e2d4a; border-radius: 2px;
+      position: relative; margin: 16px 0;
+    }
+    .tl-marker {
+      position: absolute; top: 50%; transform: translate(-50%, -50%);
+      width: 10px; height: 10px; border-radius: 50%;
+    }
+
+    /* ── Select ───────────────────────────────────────────────────────── */
+    select {
+      background: #0a1020; border: 1px solid #1e2d4a; color: #e2e8f0;
+      border-radius: 8px; padding: 10px 14px; font-size: 14px; width: 100%;
+      outline: none; cursor: pointer;
+    }
+    select:focus { border-color: #3b82f6; }
+    input[type="date"] {
+      background: #0a1020; border: 1px solid #1e2d4a; color: #e2e8f0;
+      border-radius: 8px; padding: 10px 14px; font-size: 14px; width: 100%;
+      outline: none;
+    }
+    input[type="date"]:focus { border-color: #3b82f6; }
+    input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cursor: pointer; }
+  </style>
+</head>
+<body class="min-h-screen pb-20">
+
+  <!-- ── Header ──────────────────────────────────────────────────────────── -->
+  <header style="background: linear-gradient(180deg, #070d1f 0%, #060b17 100%); border-bottom: 1px solid #1e2d4a;">
+    <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
+      <div>
+        <div class="flex items-center gap-3">
+          <span style="font-size:26px">⚽</span>
+          <h1 class="text-2xl font-bold tracking-tight gradient-text">WC 2026 PREDICTOR</h1>
+        </div>
+        <p class="text-xs text-slate-500 mt-0.5 ml-10">Advanced ML &amp; Monte Carlo Match Simulation</p>
+      </div>
+      <div id="api-status" class="flex items-center gap-2 text-xs px-3 py-1.5 rounded-full" style="background:#0d1526; border:1px solid #1e2d4a;">
+        <span id="status-dot" class="w-2 h-2 rounded-full bg-slate-600"></span>
+        <span id="status-text" class="text-slate-400">Checking API…</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="max-w-6xl mx-auto px-6 py-8">
+
+    <!-- ── Input grid ──────────────────────────────────────────────────────── -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+      <!-- Match Setup -->
+      <div class="card p-6">
+        <h2 class="text-xs font-semibold tracking-widest text-slate-400 uppercase mb-5">Match Setup</h2>
+
+        <!-- Team dropdowns -->
+        <div class="grid grid-cols-5 gap-3 items-end mb-5">
+          <div class="col-span-2">
+            <label class="text-xs text-slate-400 mb-1.5 block">Team A</label>
+            <div id="dd-team1" class="sd-wrapper"></div>
+          </div>
+          <div class="col-span-1 flex justify-center pb-2">
+            <span class="text-slate-500 font-bold text-lg">VS</span>
+          </div>
+          <div class="col-span-2">
+            <label class="text-xs text-slate-400 mb-1.5 block">Team B</label>
+            <div id="dd-team2" class="sd-wrapper"></div>
+          </div>
+        </div>
+
+        <!-- Date -->
+        <div class="mb-4">
+          <label class="text-xs text-slate-400 mb-1.5 block">Match Date</label>
+          <input type="date" id="match-date" value="2026-06-20" min="2026-06-11" max="2026-07-19" />
+        </div>
+
+        <!-- Venue -->
+        <div class="mb-4">
+          <label class="text-xs text-slate-400 mb-1.5 block">Venue</label>
+          <select id="venue-select">
+            <option value="MetLife Stadium">MetLife Stadium — New York/New Jersey</option>
+            <option value="SoFi Stadium">SoFi Stadium — Los Angeles</option>
+            <option value="AT&T Stadium">AT&amp;T Stadium — Dallas</option>
+            <option value="Levi's Stadium">Levi's Stadium — San Francisco</option>
+            <option value="Hard Rock Stadium">Hard Rock Stadium — Miami</option>
+            <option value="Lumen Field">Lumen Field — Seattle</option>
+            <option value="Gillette Stadium">Gillette Stadium — Boston</option>
+            <option value="Mercedes-Benz Stadium">Mercedes-Benz Stadium — Atlanta</option>
+            <option value="NRG Stadium">NRG Stadium — Houston</option>
+            <option value="Lincoln Financial Field">Lincoln Financial Field — Philadelphia</option>
+            <option value="Arrowhead Stadium">Arrowhead Stadium — Kansas City</option>
+            <option value="Estadio Azteca">Estadio Azteca — Mexico City</option>
+            <option value="Estadio Akron">Estadio Akron — Guadalajara</option>
+            <option value="Estadio BBVA">Estadio BBVA — Monterrey</option>
+            <option value="BMO Field">BMO Field — Toronto</option>
+            <option value="BC Place">BC Place — Vancouver</option>
+            <option value="Neutral">Neutral Venue</option>
+          </select>
+        </div>
+
+        <!-- Stage -->
+        <div>
+          <label class="text-xs text-slate-400 mb-1.5 block">Tournament Stage</label>
+          <select id="stage-select">
+            <option value="group">Group Stage</option>
+            <option value="r32">Round of 32</option>
+            <option value="r16">Round of 16</option>
+            <option value="qf">Quarter-Final</option>
+            <option value="sf">Semi-Final</option>
+            <option value="final">Final</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Advanced Parameters -->
+      <div class="card p-6">
+        <h2 class="text-xs font-semibold tracking-widest text-slate-400 uppercase mb-5">Advanced Parameters</h2>
+
+        <!-- Weather -->
+        <div class="mb-5">
+          <div class="flex justify-between items-center mb-2">
+            <div class="flex items-center gap-2">
+              <span class="text-sm">🌤</span>
+              <span class="text-sm font-medium">Weather Conditions</span>
+            </div>
+            <span id="weather-val" class="text-sm font-mono text-blue-400">Normal (50)</span>
+          </div>
+          <input type="range" id="weather-slider" min="0" max="100" step="1" value="50" />
+          <div class="flex justify-between text-xs text-slate-600 mt-1">
+            <span>⛈ Severe</span><span>☀️ Ideal</span>
+          </div>
+        </div>
+
+        <!-- Team A Form -->
+        <div class="mb-5">
+          <div class="flex justify-between items-center mb-2">
+            <div class="flex items-center gap-2">
+              <span class="text-sm">📈</span>
+              <span class="text-sm font-medium">Team A Momentum</span>
+            </div>
+            <span id="form-a-val" class="text-sm font-mono text-emerald-400">±0%</span>
+          </div>
+          <input type="range" id="form-a-slider" class="green" min="-10" max="10" step="1" value="0" />
+          <div class="flex justify-between text-xs text-slate-600 mt-1">
+            <span>−10% Poor form</span><span>+10% Hot streak</span>
+          </div>
+        </div>
+
+        <!-- Team B Form -->
+        <div class="mb-5">
+          <div class="flex justify-between items-center mb-2">
+            <div class="flex items-center gap-2">
+              <span class="text-sm">📈</span>
+              <span class="text-sm font-medium">Team B Momentum</span>
+            </div>
+            <span id="form-b-val" class="text-sm font-mono text-red-400">±0%</span>
+          </div>
+          <input type="range" id="form-b-slider" class="red" min="-10" max="10" step="1" value="0" />
+          <div class="flex justify-between text-xs text-slate-600 mt-1">
+            <span>−10% Poor form</span><span>+10% Hot streak</span>
+          </div>
+        </div>
+
+        <!-- Match Stakes -->
+        <div class="mb-5">
+          <div class="flex justify-between items-center mb-2">
+            <div class="flex items-center gap-2">
+              <span class="text-sm">🏆</span>
+              <span class="text-sm font-medium">Match Stakes</span>
+            </div>
+            <span id="stakes-val" class="text-sm font-mono text-yellow-400">Medium (50)</span>
+          </div>
+          <input type="range" id="stakes-slider" min="0" max="100" step="5" value="50" />
+          <div class="flex justify-between text-xs text-slate-600 mt-1">
+            <span>Friendly</span><span>World Cup Final</span>
+          </div>
+        </div>
+
+        <!-- Simulation Depth -->
+        <div>
+          <div class="flex justify-between items-center mb-2">
+            <div class="flex items-center gap-2">
+              <span class="text-sm">⚡</span>
+              <span class="text-sm font-medium">Simulation Depth</span>
+            </div>
+            <span id="depth-val" class="text-sm font-mono text-purple-400">500 MC runs</span>
+          </div>
+          <input type="range" id="depth-slider" min="100" max="5000" step="100" value="500" />
+          <div class="flex justify-between text-xs text-slate-600 mt-1">
+            <span>100 (fast)</span><span>5,000 (precise)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Predict button ────────────────────────────────────────────────────── -->
+    <div class="flex justify-center mt-7">
+      <button id="predict-btn" onclick="runPrediction()"
+        class="relative px-10 py-3.5 rounded-xl font-semibold text-sm tracking-wide transition-all duration-200"
+        style="background: linear-gradient(135deg, #2563eb, #1d4ed8); box-shadow: 0 0 24px rgba(59,130,246,.35);">
+        <span id="btn-text" class="flex items-center gap-2">
+          <span>🔮</span> Predict Match
+        </span>
+        <span id="btn-loading" class="hidden flex items-center gap-2">
+          <svg class="spinner w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+          </svg>
+          Simulating…
+        </span>
+      </button>
+    </div>
+
+    <!-- ── Error banner ──────────────────────────────────────────────────────── -->
+    <div id="error-banner" class="hidden mt-5 p-4 rounded-xl text-sm text-red-300"
+      style="background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3);">
+    </div>
+
+    <!-- ── Results ───────────────────────────────────────────────────────────── -->
+    <div id="results" class="hidden mt-8 space-y-5">
+
+      <!-- Match header -->
+      <div id="res-header" class="card p-6 text-center fade-up"></div>
+
+      <!-- Win probability -->
+      <div id="res-prob" class="card p-6 fade-up" style="animation-delay:.05s"></div>
+
+      <!-- Score + stats side by side -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div id="res-score" class="card p-6 fade-up" style="animation-delay:.1s"></div>
+        <div id="res-stats" class="card p-6 fade-up" style="animation-delay:.15s"></div>
+      </div>
+
+      <!-- Goal timeline -->
+      <div id="res-timeline" class="card p-6 fade-up" style="animation-delay:.2s"></div>
+
+      <!-- Key players -->
+      <div id="res-players" class="card p-6 fade-up" style="animation-delay:.25s"></div>
+
+      <!-- Narrative + adjustments -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div id="res-narrative" class="card p-6 fade-up" style="animation-delay:.3s"></div>
+        <div id="res-adjustments" class="card p-6 fade-up" style="animation-delay:.35s"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // ═══════════════════════════════════════════════════════════════════════
+  // ── CONFIGURATION — change API_BASE to your deployed server URL ────────
+  // ═══════════════════════════════════════════════════════════════════════
+  const API_BASE = 'http://localhost:5001';
+
+  // ── Teams (48 WC 2026) ────────────────────────────────────────────────
+  const TEAMS = [
+    'Algeria','Argentina','Australia','Austria','Belgium',
+    'Bosnia and Herzegovina','Brazil','Cabo Verde','Canada','Colombia',
+    'Croatia','Curaçao','Czech Republic','DR Congo','Ecuador',
+    'Egypt','England','France','Germany','Ghana',
+    'Haiti','Iran','Iraq','Ivory Coast','Japan',
+    'Jordan','Mexico','Morocco','Netherlands','New Zealand',
+    'Norway','Panama','Paraguay','Portugal','Qatar',
+    'Saudi Arabia','Scotland','Senegal','South Africa','South Korea',
+    'Spain','Sweden','Switzerland','Türkiye','Tunisia',
+    'United States','Uruguay','Uzbekistan',
+  ];
+
+  const FLAGS = {
+    'Algeria':'🇩🇿','Argentina':'🇦🇷','Australia':'🇦🇺','Austria':'🇦🇹',
+    'Belgium':'🇧🇪','Bosnia and Herzegovina':'🇧🇦','Brazil':'🇧🇷',
+    'Cabo Verde':'🇨🇻','Canada':'🇨🇦','Colombia':'🇨🇴','Croatia':'🇭🇷',
+    'Curaçao':'🇨🇼','Czech Republic':'🇨🇿','DR Congo':'🇨🇩',
+    'Ecuador':'🇪🇨','Egypt':'🇪🇬','England':'🏴󠁧󠁢󠁥󠁮󠁧󠁿','France':'🇫🇷',
+    'Germany':'🇩🇪','Ghana':'🇬🇭','Haiti':'🇭🇹','Iran':'🇮🇷',
+    'Iraq':'🇮🇶','Ivory Coast':'🇨🇮','Japan':'🇯🇵','Jordan':'🇯🇴',
+    'Mexico':'🇲🇽','Morocco':'🇲🇦','Netherlands':'🇳🇱',
+    'New Zealand':'🇳🇿','Norway':'🇳🇴','Panama':'🇵🇦','Paraguay':'🇵🇾',
+    'Portugal':'🇵🇹','Qatar':'🇶🇦','Saudi Arabia':'🇸🇦','Scotland':'🏴󠁧󠁢󠁳󠁣󠁴󠁿',
+    'Senegal':'🇸🇳','South Africa':'🇿🇦','South Korea':'🇰🇷','Spain':'🇪🇸',
+    'Sweden':'🇸🇪','Switzerland':'🇨🇭','Türkiye':'🇹🇷','Tunisia':'🇹🇳',
+    'United States':'🇺🇸','Uruguay':'🇺🇾','Uzbekistan':'🇺🇿',
+  };
+
+  // ── State ─────────────────────────────────────────────────────────────
+  let selTeam1 = '', selTeam2 = '';
+
+  // ── Searchable Dropdown ───────────────────────────────────────────────
+  function buildDropdown(wrapperId, placeholder, onSelect) {
+    const wrapper = document.getElementById(wrapperId);
+    let selected = '';
+
+    const trigger = document.createElement('div');
+    trigger.className = 'sd-trigger';
+    trigger.innerHTML = `<span class="placeholder text-slate-500">${placeholder}</span><span class="text-slate-500">▾</span>`;
+
+    const panel = document.createElement('div');
+    panel.className = 'sd-panel';
+
+    const search = document.createElement('input');
+    search.className = 'sd-search';
+    search.placeholder = 'Search…';
+    search.type = 'text';
+
+    const list = document.createElement('div');
+    list.className = 'sd-list';
+
+    function render(filter = '') {
+      const q = filter.toLowerCase();
+      list.innerHTML = TEAMS
+        .filter(t => t.toLowerCase().includes(q))
+        .map(t => `<div class="sd-option${t === selected ? ' selected' : ''}" data-val="${t}">
+            ${FLAGS[t] || '🏳'} ${t}
+          </div>`).join('');
+      list.querySelectorAll('.sd-option').forEach(el => {
+        el.addEventListener('mousedown', e => {
+          e.preventDefault();
+          selected = el.dataset.val;
+          trigger.innerHTML = `<span>${FLAGS[selected] || '🏳'} ${selected}</span><span class="text-slate-500">▾</span>`;
+          trigger.classList.remove('open');
+          panel.classList.remove('open');
+          search.value = '';
+          render();
+          onSelect(selected);
+        });
+      });
+    }
+
+    render();
+    panel.appendChild(search);
+    panel.appendChild(list);
+    wrapper.appendChild(trigger);
+    wrapper.appendChild(panel);
+
+    trigger.addEventListener('click', () => {
+      const isOpen = panel.classList.contains('open');
+      // Close all other dropdowns first
+      document.querySelectorAll('.sd-panel.open').forEach(p => p.classList.remove('open'));
+      document.querySelectorAll('.sd-trigger.open').forEach(t => t.classList.remove('open'));
+      if (!isOpen) {
+        panel.classList.add('open');
+        trigger.classList.add('open');
+        search.focus();
+      }
+    });
+
+    search.addEventListener('input', () => render(search.value));
+
+    search.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        panel.classList.remove('open');
+        trigger.classList.remove('open');
+      }
+    });
+  }
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.sd-wrapper')) {
+      document.querySelectorAll('.sd-panel.open').forEach(p => p.classList.remove('open'));
+      document.querySelectorAll('.sd-trigger.open').forEach(t => t.classList.remove('open'));
+    }
+  });
+
+  buildDropdown('dd-team1', 'Select Team A…', val => { selTeam1 = val; });
+  buildDropdown('dd-team2', 'Select Team B…', val => { selTeam2 = val; });
+
+  // ── Sliders ───────────────────────────────────────────────────────────
+  function initSliders() {
+    const sliders = [
+      { id: 'weather-slider', display: 'weather-val',
+        format: v => v < 25 ? `Severe (${v})` : v < 45 ? `Poor (${v})` : v < 65 ? `Normal (${v})` : v < 80 ? `Good (${v})` : `Ideal (${v})` },
+      { id: 'form-a-slider', display: 'form-a-val',
+        format: v => v > 0 ? `+${v}%` : v < 0 ? `${v}%` : '±0%' },
+      { id: 'form-b-slider', display: 'form-b-val',
+        format: v => v > 0 ? `+${v}%` : v < 0 ? `${v}%` : '±0%' },
+      { id: 'stakes-slider', display: 'stakes-val',
+        format: v => v < 25 ? `Low (${v})` : v < 50 ? `Moderate (${v})` : v < 75 ? `Medium (${v})` : v < 90 ? `High (${v})` : `Maximum (${v})` },
+      { id: 'depth-slider', display: 'depth-val',
+        format: v => `${Number(v).toLocaleString()} MC runs` },
+    ];
+    sliders.forEach(({ id, display, format }) => {
+      const el = document.getElementById(id);
+      const disp = document.getElementById(display);
+      disp.textContent = format(el.value);
+      el.addEventListener('input', () => { disp.textContent = format(el.value); });
+    });
+  }
+  initSliders();
+
+  // ── API health check ──────────────────────────────────────────────────
+  async function checkApiStatus() {
+    const dot  = document.getElementById('status-dot');
+    const text = document.getElementById('status-text');
+    try {
+      const r = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(3000) });
+      const d = await r.json();
+      dot.className  = 'w-2 h-2 rounded-full bg-emerald-500';
+      text.textContent = d.model_loaded ? 'API Online · Model Loaded' : 'API Online · Elo Fallback';
+      text.className = 'text-emerald-400';
+    } catch {
+      dot.className  = 'w-2 h-2 rounded-full bg-red-500';
+      text.textContent = 'API Offline';
+      text.className = 'text-red-400';
+    }
+  }
+  checkApiStatus();
+
+  // ── Run Prediction ────────────────────────────────────────────────────
+  async function runPrediction() {
+    const errBanner = document.getElementById('error-banner');
+    errBanner.classList.add('hidden');
+
+    if (!selTeam1 || !selTeam2) {
+      showError('Please select both teams before predicting.'); return;
+    }
+    if (selTeam1 === selTeam2) {
+      showError('Please select two different teams.'); return;
+    }
+
+    setLoading(true);
+
+    const payload = {
+      team1:     selTeam1,
+      team2:     selTeam2,
+      date:      document.getElementById('match-date').value,
+      venue:     document.getElementById('venue-select').value,
+      stage:     document.getElementById('stage-select').value,
+      weather:   Number(document.getElementById('weather-slider').value),
+      form_a:    Number(document.getElementById('form-a-slider').value),
+      form_b:    Number(document.getElementById('form-b-slider').value),
+      stakes:    Number(document.getElementById('stakes-slider').value),
+      sim_depth: Number(document.getElementById('depth-slider').value),
+    };
+
+    try {
+      const resp = await fetch(`${API_BASE}/predict`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: resp.statusText }));
+        throw new Error(err.error || resp.statusText);
+      }
+      const data = await resp.json();
+      renderResults(data);
+    } catch (err) {
+      showError(`Prediction failed: ${err.message}. Is the API running at ${API_BASE}?`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function setLoading(on) {
+    const btn = document.getElementById('predict-btn');
+    document.getElementById('btn-text').classList.toggle('hidden', on);
+    document.getElementById('btn-loading').classList.toggle('hidden', !on);
+    btn.disabled = on;
+    btn.style.opacity = on ? '0.7' : '1';
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error-banner');
+    el.textContent = '⚠ ' + msg;
+    el.classList.remove('hidden');
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────
+  const pct = n => `${(n * 100).toFixed(1)}%`;
+  const flag = t => FLAGS[t] || '🏳';
+  const stageLabel = s => ({
+    group:'Group Stage', r32:'Round of 32', r16:'Round of 16',
+    qf:'Quarter-Final', sf:'Semi-Final', final:'Final'
+  }[s] || s);
+
+  function statBar(v1, v2, colorLeft = '#3b82f6', colorRight = '#ef4444') {
+    const total = (v1 + v2) || 1;
+    const p1 = (v1 / total * 100).toFixed(1);
+    const p2 = (v2 / total * 100).toFixed(1);
+    return `<div class="flex rounded overflow-hidden" style="height:6px">
+      <div class="stat-fill" style="width:${p1}%;background:${colorLeft}"></div>
+      <div class="stat-fill" style="width:${p2}%;background:${colorRight}"></div>
+    </div>`;
+  }
+
+  // ── Render Results ────────────────────────────────────────────────────
+  function renderResults(d) {
+    renderHeader(d);
+    renderProb(d);
+    renderScore(d);
+    renderStats(d);
+    renderTimeline(d);
+    renderPlayers(d);
+    renderNarrative(d);
+    renderAdjustments(d);
+
+    const results = document.getElementById('results');
+    results.classList.remove('hidden');
+    setTimeout(() => results.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  }
+
+  function renderHeader(d) {
+    const el = document.getElementById('res-header');
+    const dateStr = d.date ? new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' }) : '';
+    el.innerHTML = `
+      <div class="text-xs text-slate-500 uppercase tracking-widest mb-3">${stageLabel(d.stage)} · ${d.venue}</div>
+      <div class="flex items-center justify-center gap-6 text-3xl font-bold mb-2">
+        <span>${flag(d.team1)} ${d.team1}</span>
+        <span class="text-slate-600 text-xl">vs</span>
+        <span>${flag(d.team2)} ${d.team2}</span>
+      </div>
+      <div class="text-xs text-slate-500">${dateStr}</div>`;
+  }
+
+  function renderProb(d) {
+    const el = document.getElementById('res-prob');
+    const ml = d.ml_win_prob || {};
+    const p1 = ml.win_t1 || 0, pd = ml.draw || 0, p2 = ml.win_t2 || 0;
+    const total = p1 + pd + p2 || 1;
+    const np1 = p1 / total, npd = pd / total, np2 = p2 / total;
+
+    el.innerHTML = `
+      <div class="text-xs text-slate-400 uppercase tracking-widest mb-4">Win Probability</div>
+      <div class="flex justify-between text-sm font-semibold mb-2">
+        <span class="text-blue-400">${flag(d.team1)} ${d.team1}</span>
+        <span class="text-slate-400">Draw</span>
+        <span class="text-red-400">${d.team2} ${flag(d.team2)}</span>
+      </div>
+      <div class="prob-bar mb-3">
+        <div class="prob-t1" style="width:${(np1*100).toFixed(1)}%"></div>
+        <div class="prob-draw" style="width:${(npd*100).toFixed(1)}%"></div>
+        <div class="prob-t2" style="width:${(np2*100).toFixed(1)}%"></div>
+      </div>
+      <div class="flex justify-between">
+        <div class="text-center">
+          <div class="text-2xl font-bold text-blue-400">${pct(np1)}</div>
+          <div class="text-xs text-slate-500">Win</div>
+        </div>
+        <div class="text-center">
+          <div class="text-2xl font-bold text-slate-400">${pct(npd)}</div>
+          <div class="text-xs text-slate-500">Draw</div>
+        </div>
+        <div class="text-center">
+          <div class="text-2xl font-bold text-red-400">${pct(np2)}</div>
+          <div class="text-xs text-slate-500">Win</div>
+        </div>
+      </div>
+      <div class="mt-4 pt-4 flex justify-between text-xs text-slate-500" style="border-top:1px solid #1e2d4a">
+        <span>Monte Carlo: ${(d.mc_win_prob?.team1 * 100 || 0).toFixed(1)}% ${d.team1}</span>
+        <span>${(d.mc_win_prob?.team2 * 100 || 0).toFixed(1)}% ${d.team2}</span>
+      </div>`;
+  }
+
+  function renderScore(d) {
+    const el = document.getElementById('res-score');
+    const s = d.score || {};
+    const suffix = d.penalties ? ' 🥅 Pens' : d.extra_time ? ' ⏱ AET' : '';
+    const pen = d.penalty_score ? `<div class="text-xs text-slate-500 mt-1">(Penalties: ${d.penalty_score.team1}–${d.penalty_score.team2})</div>` : '';
+    const winnerBadge = d.winner && d.winner !== 'draw'
+      ? `<div class="inline-block mt-3 text-xs px-3 py-1 rounded-full font-medium"
+           style="background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.3);color:#60a5fa">
+           🏆 ${d.winner} wins${suffix}
+         </div>`
+      : `<div class="inline-block mt-3 text-xs px-3 py-1 rounded-full font-medium"
+           style="background:rgba(100,116,139,.15);border:1px solid rgba(100,116,139,.3);color:#94a3b8">
+           Match Drawn
+         </div>`;
+    el.innerHTML = `
+      <div class="text-xs text-slate-400 uppercase tracking-widest mb-4">Predicted Score</div>
+      <div class="flex items-center justify-center gap-4">
+        <div class="text-right">
+          <div class="text-lg font-semibold text-slate-200">${flag(d.team1)} ${d.team1}</div>
+        </div>
+        <div class="text-center">
+          <div class="text-5xl font-black tracking-tight" style="color:#e2e8f0">
+            <span class="text-blue-400">${s.team1 ?? '?'}</span>
+            <span class="text-slate-600 mx-1">–</span>
+            <span class="text-red-400">${s.team2 ?? '?'}</span>
+          </div>
+          ${pen}
+        </div>
+        <div class="text-left">
+          <div class="text-lg font-semibold text-slate-200">${flag(d.team2)} ${d.team2}</div>
+        </div>
+      </div>
+      <div class="text-center">${winnerBadge}</div>`;
+  }
+
+  function renderStats(d) {
+    const el = document.getElementById('res-stats');
+    const xg  = d.xg  || {};
+    const pos  = d.possession || {};
+    const sh   = d.shots || {};
+    const sot  = d.shots_on_target || {};
+    const cor  = d.corners || {};
+    const fls  = d.fouls || {};
+
+    const row = (label, v1, v2) => {
+      const n1 = parseFloat(v1) || 0, n2 = parseFloat(v2) || 0;
+      return `<div class="mb-3">
+        <div class="flex justify-between text-sm mb-1">
+          <span class="text-blue-300 font-medium">${v1}</span>
+          <span class="text-slate-500 text-xs">${label}</span>
+          <span class="text-red-300 font-medium">${v2}</span>
+        </div>
+        ${statBar(n1, n2)}
+      </div>`;
+    };
+
+    el.innerHTML = `
+      <div class="text-xs text-slate-400 uppercase tracking-widest mb-4">Match Statistics</div>
+      <div class="text-xs text-slate-500 flex justify-between mb-3">
+        <span>${flag(d.team1)} ${d.team1}</span>
+        <span>${flag(d.team2)} ${d.team2}</span>
+      </div>
+      ${row('xG',            xg.team1?.toFixed(2)  ?? '—', xg.team2?.toFixed(2)  ?? '—')}
+      ${row('Possession',    `${pos.team1 ?? '?'}%`,        `${pos.team2 ?? '?'}%`)}
+      ${row('Shots',         sh.team1  ?? '?',              sh.team2  ?? '?')}
+      ${row('Shots on Target', sot.team1 ?? '?',            sot.team2 ?? '?')}
+      ${row('Corners',       cor.team1 ?? '?',              cor.team2 ?? '?')}
+      ${row('Fouls',         fls.team1 ?? '?',              fls.team2 ?? '?')}
+      <div class="mt-4 pt-3 flex justify-between text-xs text-slate-500" style="border-top:1px solid #1e2d4a">
+        <span>Strategy: <span class="text-slate-400">${d.strategy?.team1 ?? '—'}</span></span>
+        <span>Strategy: <span class="text-slate-400">${d.strategy?.team2 ?? '—'}</span></span>
+      </div>`;
+  }
+
+  function renderTimeline(d) {
+    const el = document.getElementById('res-timeline');
+    const scorers = (d.goal_scorers || []).sort((a, b) => a.minute - b.minute);
+    if (!scorers.length) {
+      el.innerHTML = `<div class="text-xs text-slate-400 uppercase tracking-widest mb-2">Goal Timeline</div>
+        <p class="text-slate-500 text-sm">No goals scored.</p>`;
+      return;
+    }
+
+    const markerColor = scorer => scorer.team === d.team1 ? '#3b82f6' : '#ef4444';
+    const typeIcon = t => ({ open_play:'⚽', penalty:'🥅', freekick:'🎯' }[t] || '⚽');
+
+    const tlBar = `<div class="tl-bar">
+      ${scorers.map(s => `<div class="tl-marker" style="left:${(s.minute/90*100).toFixed(1)}%;background:${markerColor(s)};width:12px;height:12px;box-shadow:0 0 6px ${markerColor(s)}80;"></div>`).join('')}
+      <div style="position:absolute;right:0;top:50%;transform:translate(0,-50%);font-size:10px;color:#475569">90'</div>
+    </div>`;
+
+    const eventList = scorers.map(s => `
+      <div class="flex items-center gap-3 py-2.5" style="border-bottom:1px solid #1e2d4a">
+        <div class="text-xs font-mono text-slate-400 w-8 shrink-0">${s.minute}'</div>
+        <div class="w-2 h-2 rounded-full shrink-0" style="background:${markerColor(s)}"></div>
+        <div class="text-sm">
+          <span class="font-medium">${typeIcon(s.type)} ${s.player}</span>
+          <span class="text-xs text-slate-500 ml-1">(${s.team})</span>
+          ${s.assist ? `<span class="text-xs text-slate-500"> · assist: ${s.assist}</span>` : ''}
+        </div>
+        <div class="ml-auto text-xs px-2 py-0.5 rounded" style="background:${markerColor(s)}22;color:${markerColor(s)}">${s.type.replace('_', ' ')}</div>
+      </div>`).join('');
+
+    el.innerHTML = `
+      <div class="text-xs text-slate-400 uppercase tracking-widest mb-3">Goal Timeline</div>
+      ${tlBar}
+      <div class="mt-2">${eventList}</div>`;
+  }
+
+  function renderPlayers(d) {
+    const el = document.getElementById('res-players');
+    const players = d.key_players || [];
+    if (!players.length) {
+      el.innerHTML = `<div class="text-xs text-slate-400 uppercase tracking-widest">Key Players</div>
+        <p class="text-slate-500 text-sm mt-2">No data available.</p>`;
+      return;
+    }
+    const cards = players.map(p => {
+      const isT1 = p.team === d.team1;
+      const color = isT1 ? '#3b82f6' : '#ef4444';
+      const rating = Math.round(p.rating || 70);
+      const ratingColor = rating >= 85 ? '#fbbf24' : rating >= 80 ? '#34d399' : '#94a3b8';
+      return `<div class="p-3 rounded-lg flex items-center gap-3" style="background:#0a1020;border:1px solid #1e2d4a">
+        <div class="w-8 h-8 rounded-full flex items-center justify-center text-lg shrink-0" style="background:${color}22;border:1px solid ${color}44">
+          ${flag(p.team)}
+        </div>
+        <div class="min-w-0">
+          <div class="text-sm font-medium truncate">${p.player}</div>
+          <div class="text-xs text-slate-500 truncate">${p.team}</div>
+        </div>
+        <div class="ml-auto shrink-0 text-center">
+          <div class="text-lg font-bold" style="color:${ratingColor}">${rating}</div>
+          <div class="text-xs text-slate-500">OVR</div>
+        </div>
+      </div>`;
+    });
+
+    el.innerHTML = `
+      <div class="text-xs text-slate-400 uppercase tracking-widest mb-4">Key Players to Watch</div>
+      <div class="grid grid-cols-2 gap-2">${cards.join('')}</div>`;
+  }
+
+  function renderNarrative(d) {
+    const el = document.getElementById('res-narrative');
+    el.innerHTML = `
+      <div class="text-xs text-slate-400 uppercase tracking-widest mb-4">Match Narrative</div>
+      <blockquote class="text-sm text-slate-300 leading-relaxed" style="border-left:3px solid #3b82f6;padding-left:12px">
+        ${d.narrative || 'No narrative available.'}
+      </blockquote>
+      <div class="mt-4 pt-3 text-xs text-slate-500" style="border-top:1px solid #1e2d4a">
+        Confidence: ${d.n_mc?.toLocaleString() ?? 500} Monte Carlo simulations
+      </div>`;
+  }
+
+  function renderAdjustments(d) {
+    const el = document.getElementById('res-adjustments');
+    const adj = d.adjustments || {};
+    const pct = v => v != null ? `×${v.toFixed(3)}` : '—';
+    const badge = (label, val, base = 1) => {
+      const color = val > base ? '#10b981' : val < base ? '#ef4444' : '#64748b';
+      return `<div class="flex items-center justify-between py-1.5" style="border-bottom:1px solid #1e2d4a">
+        <span class="text-xs text-slate-400">${label}</span>
+        <span class="text-xs font-mono" style="color:${color}">${pct(val)}</span>
+      </div>`;
+    };
+    el.innerHTML = `
+      <div class="text-xs text-slate-400 uppercase tracking-widest mb-4">Applied Adjustments</div>
+      <div class="text-xs text-slate-500 mb-3">Multipliers applied to base xG values:</div>
+      ${badge('🌤 Weather',        adj.weather_factor)}
+      ${badge('📈 Team A Form',    adj.form_a_factor)}
+      ${badge('📈 Team B Form',    adj.form_b_factor)}
+      ${badge('🏆 Stakes',         adj.stakes_factor)}
+      <div class="mt-3 text-xs text-slate-500">
+        Base xG: ${d.xg?.team1?.toFixed(3) ?? '—'} vs ${d.xg?.team2?.toFixed(3) ?? '—'}
+      </div>`;
+  }
+  </script>
+</body>
+</html>
